@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Page Title</title>
+       <script src="https://cdnjs.cloudflare.com/ajax/libs/brython/3.7.1/brython.min.js">
+        </script>
+      <style>
+        body {
+    background-color: #111;    
+}
+#board {
+    font-size: 27px;
+    margin: auto;
+    height: 304px;
+    width: 304px;
+    display: grid;
+    grid-template-columns: 
+    1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr;
+    grid-template-rows:
+    1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr;
+}
+      </style>
+    </head>
+    <body onload="MCR()">
+        <div id="board"></div>
+    </body>
+  <script>
+    //</script><script type="text/python">
+
+from browser import document, html, prompt, alert
+
+class ChessPiece:
+
+    def __init__(self, board, i, j, king=None):
+        self._king = king or self
+        self._board = board
+        self._board[i][j] = self
+        self._i = i
+        self._j = j
+        if isinstance(self, King):
+            self._subjects = []
+        else:
+            self._king._subjects.append(self)
+        
+    def move(self, i, j, serious=True):
+        if (i, j) not in self.moves():
+            return 0
+        b = self._king.tacticalchart()
+        b[self._i][self._j]._move(i, j)
+        if b[i][j]._king.incheck():
+            return 0
+        if serious:
+            self._move(i, j)
+        return 1     
+    
+    def moves(self):
+        m = []
+        for d in self._directions():
+            for i, j in d:
+                if not self._board[i][j]:
+                    m.append((i, j))
+                elif (
+                    self._board[i][j]._king 
+                    is not self._king
+                ):
+                    m.append((i, j))
+                    break
+                else:
+                    break
+        return m
+    
+    def kill(self, foe, enpassant=False):
+        foe._king._subjects.remove(foe)
+        if enpassant:
+            self._board[foe._i][foe._j] = 0
+            
+    def _move(self, i, j):
+        if self._board[i][j]:
+            self.kill(self._board[i][j])
+        self._board[i][j] = self
+        self._board[self._i][self._j] = 0
+        self._i = i 
+        self._j = j
+    
+    def _orthogonally(self):
+        i, j = self._i, self._j
+        return [
+            zip(range(i+1, 8), [j]*7),
+            zip(range(i-1, -1, -1), [j]*7),
+            zip([i]*7, range(j+1, 8)),
+            zip([i]*7, range(j-1, -1, -1))
+        ]
+        
+    def _diagonally(self):
+        i, j, r = self._i, self._j, range
+        return [
+            zip(r(i+1, 8), r(j+1, 8)),
+            zip(r(i+1, 8), r(j-1, -1, -1)),
+            zip(r(i-1, -1, -1), r(j+1, 8)),
+            zip(r(i-1, -1, -1), r(j-1, -1, -1))
+        ]
+        
+        
+class King(ChessPiece):
+
+    def __init__(self, board, i, j, king=None):
+        super().__init__(board, i, j, king)
+        self._unmoved = True
+        
+    def __repr__(self):
+        return 'K' 
+
+    def move(self, i, j, serious=True):
+        if self._j in (j+2, j-2) and self._unmoved:
+            return self._rochade(i, j, serious)
+        m = super().move(i, j, serious)
+        if m and serious:
+            self._unmoved = False
+        return m
+    
+    def moves(self):
+        m = []
+        for i in range(self._i-1, self._i+2):
+            for j in range(self._j-1, self._j+2):
+                if i==self._i and j==self._j:
+                    continue
+                if 0<=i<8 and 0<=j<8 and (
+                    not self._board[i][j] 
+                    or self._board[i][j]._king 
+                        is not self._king
+                ):
+                    m.append((i, j))
+        return m
+    
+    def setenemy(self, enemy):
+        self._enemy = enemy
+        
+    def tacticalchart(self):
+        b = [[0 for j in range(8)] for i in range(8)]
+        thisking = King(b, self._i, self._j)
+        otherking = King(
+            b, self._enemy._i, self._enemy._j
+        )
+        thisking.setenemy(otherking)
+        otherking.setenemy(thisking)
+        for king, nking in (
+            (self, thisking), 
+            (self._enemy, otherking)
+        ):
+            for subject in king._subjects:
+                i, j = subject._i, subject._j
+                type(subject)(
+                    b, i, j, nking
+                )
+                for attr in (
+                    '_unmoved', '_hasjustrun', 
+                    '_up', '_step', '_goal'
+                ):
+                    if hasattr(subject, attr):
+                        setattr(
+                            b[i][j], attr, 
+                            getattr(subject, attr)
+                        )
+        return b    
+    
+    def _rochade(self, i, j, serious=True):
+        step = 1 if j>self._j else -1
+        rook = 7 if step==1 else 0
+        if j<self._j and self._board[i][1]:
+            return 0
+        if (
+            self._board[i][rook]._unmoved
+            and not self._board[i][self._j+step]
+            and not self._board[i][self._j+2*step]
+            and not self.incheck()
+        ):
+            b = self.tacticalchart()
+            b[self._i][self._j]._move(i, j-step)
+            if b[i][j-step]._king.incheck():
+                return 0
+            b[self._i][self._j+step]._move(i, j)
+            if b[i][j]._king.incheck():
+                return 0
+            if serious:
+                self._move(i, j)
+                self._board[i][rook]._move(i, j-step)
+                self._unmoved = False
+            return 1            
+        
+    def incheck(self):
+        for enemy in (
+            self._enemy._subjects 
+          + [self._enemy._king]
+        ):
+            if any(
+                move==(self._i, self._j)
+                for move in enemy.moves()
+            ):
+                return True
+        return False
+
+
+class Knight(ChessPiece):
+
+    def __repr__(self):
+        return 'N'
+    
+    def moves(self):
+        m = []
+        for i, j in (
+            (self._i-2, self._j-1),
+            (self._i-1, self._j-2),
+            (self._i-2, self._j+1),
+            (self._i-1, self._j+2),
+            (self._i+2, self._j-1),
+            (self._i+1, self._j-2),
+            (self._i+2, self._j+1),
+            (self._i+1, self._j+2)
+        ):
+            if 0<=i<8 and 0<=j<8 and (
+                not self._board[i][j] 
+                or self._board[i][j]._king 
+                is not self._king
+            ):
+                m.append((i, j))
+        return m
+
+
+class Rook(ChessPiece):
+    
+    def __init__(self, board, i, j, king):
+        super().__init__(board, i, j, king)
+        self._directions = self._orthogonally
+        self._unmoved = True
+    
+    def __repr__(self):
+        return 'R'
+
+    def move(self, i, j, serious=True):
+        m = super().move(i, j, serious)
+        if m and serious:
+            self._unmoved = False
+        return m
+
+
+class Bishop(ChessPiece):
+    
+    def __init__(self, board, i, j, king):
+        super().__init__(board, i, j, king)
+        self._directions = self._diagonally
+        
+    def __repr__(self):
+        return 'B'
+
+
+class Queen(ChessPiece):
+    
+    def __init__(self, board, i, j, king):
+        super().__init__(board, i, j, king)
+        self._directions = (
+            lambda: 
+            self._orthogonally()
+          + self._diagonally()
+        )
+        
+    def __repr__(self):
+        return 'Q' 
+
+
+class Pawn(ChessPiece):
+    
+    def __init__(self, board, i, j, king, up=True):
+        super().__init__(board, i, j, king)
+        self._up = up
+        self._step = -1 if up else 1
+        self._goal = 0 if up else 7
+        self._unmoved = True
+        self._hasjustrun = False
+        
+    def __repr__(self):
+        return 'P'
+    
+    def move(self, i, j, serious=True):
+        if (i, j) not in self.moves():
+            return 0
+        b = self._king.tacticalchart()
+        b[self._i][self._j]._move(i, j)
+        if b[i][j]._king.incheck():
+            return 0
+        if serious:
+            self._move(i, j)
+        if i==self._goal:
+            return 2
+        return 1
+
+    def _move(self, i, j):
+        if not self._board[i][j] and j!=self._j:
+            self.kill(
+                self._board[i-self._step][j], True
+            )
+        self._hasjustrun = (
+            True if self._i in (i-2, i+2) else False
+        )
+        self._unmoved = False
+        if self._board[i][j]:
+            self.kill(self._board[i][j])
+        self._board[i][j] = self
+        self._board[self._i][self._j] = 0
+        self._i = i 
+        self._j = j
+    
+    def moves(self):
+        m = []
+        b = self._board
+        i, j = self._i+self._step, self._j
+        if 0<=i<=7 and not b[i][j]:
+            m.append((i, j))
+            if (
+                self._unmoved 
+                and not b[i+self._step][j]
+            ):
+                m.append((i+self._step, j))
+        for j in j-1, j+1:
+            if (
+                0<=j<8 
+                and b[i][j] 
+                and b[i][j]._king is not self._king
+            ):
+                m.append((i, j))
+            if (
+                0<=j<8
+                and isinstance(
+                    b[i-self._step][j], Pawn
+                )
+                and b[i-self._step][j]._hasjustrun
+            ):
+                m.append((i, j))
+        return m
+
+
+class ChessBoard:
+
+    def __init__(self):
+        self._board = [
+            [0 for j in range(8)] for i in range(8)
+        ]
+        self._white = King(
+            self._board, 7, 4
+        )
+        self._black = King(
+            self._board, 0, 4
+        )
+        self._kings = self._white, self._black
+        self._white.setenemy(self._black)
+        self._black.setenemy(self._white)
+        Queen(
+            self._board, 7, 3, self._white
+        )
+        Queen(
+            self._board, 0, 3, self._black
+        )
+        for i, j, king in (
+            (7, 0, self._white), 
+            (7, 7, self._white),
+            (0, 0, self._black), 
+            (0, 7, self._black)
+        ):
+            Rook(self._board, i, j, king)
+        for i, j, king in (
+            (7, 1, self._white), 
+            (7, 6, self._white),
+            (0, 1, self._black), 
+            (0, 6, self._black)
+        ):
+            Knight(self._board, i, j, king)
+        for i, j, king in (
+            (7, 2, self._white), 
+            (7, 5, self._white),
+            (0, 2, self._black), 
+            (0, 5, self._black)
+        ):
+            Bishop(self._board, i, j, king)
+        for j in range(8):
+            Pawn(
+                self._board, 
+                6, j, self._white
+            )
+            Pawn(
+                self._board, 
+                1, j, self._black, False
+            )
+        self._counter = 0
+        self._player = 0
+        self._former = [self._boardstr(self._board)]
+        self._gameover = False
+        self._from = None
+    
+    def setdrawboard(self, drawboard):
+        self._drawboard = drawboard
+        self._drawboard(self._boardstr(self._board))
+    
+    def move(self, i, j):
+        if not self._from:
+            if not self._board[i][j]:
+                return False
+            if self._gameover:
+                alert('Game\'s already over!')
+                return False
+            if (
+                self._board[i][j]._king 
+                is not self._kings[self._player]
+            ):
+                alert('That\'s not your piece!')
+                return False 
+            self._from = i, j
+            return True
+        self._move(*self._from, i, j)
+        self._from = None
+    
+    def _move(self, i, j, k, l):      
+        ispawn = isinstance(self._board[i][j], Pawn)
+        isfoe = (
+            self._board[k][l]
+            and self._board[i][j]._king 
+                is not self._board[k][l]._king
+        )
+        res = self._board[i][j].move(k, l)
+        if not res:
+            alert('Invalid move!')
+            return
+        self._player = (self._player + 1)%2
+        self._former.append(
+            self._boardstr(self._board)
+        )
+        if self._fiftymoverule(ispawn, isfoe):
+            alert('Remis: Fifty-move-rule!')
+            self._gameover = True
+            return
+        if self._threereps():
+            alert('Remis: Threefold repetition!')
+            self._gameover = True
+            return
+        if res==2:
+            self._transform(k, l)
+        self._drawboard(self._boardstr(self._board))
+        res = self._goodorbadending(
+            (self._white, self._black)[self._player]
+        )      
+        if not res:
+            return   
+        if res==1:
+            alert('Checkmate!')
+            
+        else:
+            alert('Stalemate!')
+        self._gameover = True
+        
+    def _goodorbadending(self, king):
+        if not any(
+            subject.move(*move, False) 
+            for subject in king._subjects+[king]
+            for move in subject.moves()
+        ):
+            b = king.tacticalchart()
+            if b[king._i][king._j].incheck():
+                return 1
+            return -1
+        return 0
+        
+    def _threereps(self):
+        bstr = self._former[-1]
+        return (
+            self._former[::2].count(bstr)>=3
+            or self._former[1::2].count(bstr)>=3
+        )
+    
+    def _fiftymoverule(self, ispawn, isfoe):
+        if ispawn or isfoe:
+            self._counter = 0
+        else:
+            self._counter += 1
+        return self._counter >= 100
+
+    def _transform(self, i, j):
+        while True:
+            choice = prompt(
+                'Which one do you choose? '
+                '(q, r, b, n)'
+            ).strip().lower()
+            if choice in list('qrbn'):
+                break
+        self._board[i][j].kill(self._board[i][j])
+        newpiece = {
+            'q': Queen, 'r': Rook, 
+            'b': Bishop, 'n': Knight
+        }[choice](
+            self._board, i, j, 
+            self._board[i][j]._king
+        )
+            
+    def _boardstr(self, board):
+        return '\n'.join(
+            ''.join(
+                '0' if not piece else str(piece) 
+                if piece._king is self._kings[0] 
+                else str(piece).lower()
+                for piece in row
+            ) for row in board
+        )
+
+
+class ChessGUI:
+
+    def __init__(self):
+        self._pieces = {
+            'K': '\u2654', 'Q': '\u2655', 
+            'R': '\u2656', 'B': '\u2657', 
+            'N': '\u2658', 'P': '\u2659',
+            'k': '\u265A', 'q': '\u265B', 
+            'r': '\u265C', 'b': '\u265D', 
+            'n': '\u265E', 'p': '\u265F', 
+            '0': ''
+        }
+        self._to = {'#db9': '#fdb', '#b63': '#d85'}
+        self._back = {'#fdb': '#db9', '#d85': '#b63'}
+        self._fields = {}
+        self._sent = None
+        self._move.host = self
+        dget = document.getElementById
+        board = dget('board')
+        for i in range(8):
+            for j in range(8):
+                board <= html.DIV(
+                    id=f'{i} {j}',
+                    style=dict(
+                        display='flex',
+                        justifyContent='center',
+                        alignItems='center',
+                        backgroundColor=(
+                            '#db9', '#b63'
+                        )[(i+j)%2],
+                    )
+                )
+                self._fields[(i, j)] = dget(
+                    f'{i} {j}'
+                )
+                self._fields[(i, j)].addEventListener(
+                    'click', self._move, False
+                )
+    
+    def setsendmove(self, sendmove):
+        self._sendmove = sendmove
+              
+    def drawboard(self, board):
+        board = board.split('\n')
+        for i in range(8):
+            for j in range(8):
+                self._fields[(i, j)].innerHTML = \
+                    self._pieces[str(board[i][j])]
+    
+    @staticmethod                
+    def _move(event):
+        i, j = tuple(
+            int(n) for n in event.target.id.split()
+        )
+        self = ChessGUI._move.host
+        if not self._sent:
+            if not self._sendmove(i, j):
+                return
+            bgc = self._fields[(i, j)].style
+            color = self._convert(bgc)
+            self._sent = i, j
+            bgc.backgroundColor = self._to[color]
+        else:
+            bgc = self._fields[self._sent].style
+            color = self._convert(bgc)
+            bgc.backgroundColor = self._back[color]
+            self._sendmove(i, j)
+            self._sent = None
+
+    def _convert(self, styleobj):
+        color = ''.join(
+            c for c in styleobj.backgroundColor 
+            if c.isdigit() or c.isspace()
+        ).split()
+        return '#'+''.join(
+            hex(int(n))[-1] for n in color
+        )  
+
+
+cb = ChessBoard()
+gui = ChessGUI()
+gui.setsendmove(cb.move)
+cb.setdrawboard(gui.drawboard)
+  </script>
+</html>
