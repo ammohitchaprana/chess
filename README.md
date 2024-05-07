@@ -4,7 +4,8 @@
 
 ## Introduction
 
-Welcome to the Chess Game repository! This project is a virtual chess board implemented in JavaScript, HTML, and CSS. It simulates a game of chess, allowing players to make legal moves according to the rules of the game.
+Welcome to the Chess Game repository! 
+This project is a virtual chess board implemented in JavaScript, HTML, and CSS. It simulates a game of chess, allowing players to make legal moves according to the rules of the game.
 
 **Created by MCR**
 
